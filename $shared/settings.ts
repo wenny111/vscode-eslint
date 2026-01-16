@@ -19,6 +19,7 @@ namespace Is {
 	}
 }
 
+// @DATA: 是否启用eslint
 export enum Validate {
 	on = 'on',
 	off = 'off',

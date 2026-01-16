@@ -48,5 +48,37 @@
 		"Undispatched",
 		"unregistration"
 	],
-	"task.allowAutomaticTasks": "on"
+	"task.allowAutomaticTasks": "on",
+	"todo-tree.general.tags": [
+		"BUG", "HACK", "FIXME", "TODO", // 原有的
+		"@CORE", "@LEARN", "@DATA", "@Q", "@DEBUG" // 你新增的
+	],
+	"todo-tree.highlights.customHighlight": {
+		"@CORE": {
+			"icon": "star",
+			"foreground": "#ff0000", // 红色高亮，最显眼
+			"gutterIcon": true
+		},
+		"@LEARN": {
+			"icon": "star",
+			"foreground": "#00ff00", // 绿色，表示收获
+			"gutterIcon": true
+		},
+		"@DATA": {
+			"icon": "database",
+			"foreground": "#0088ff", // 蓝色，表示数据
+			"gutterIcon": true
+		},
+		"@Q": {
+			"icon": "question",
+			"foreground": "#ffcc00", // 黄色，表示疑问
+			"gutterIcon": true
+		},
+		"@DEBUG": {
+			"icon": "bug",
+			"type": "line", // 整行高亮，方便最后删除
+			"foreground": "#ffffff",
+			"background": "#ff00ff"
+		}
+	}
 }

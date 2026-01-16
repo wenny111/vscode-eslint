@@ -53,6 +53,7 @@ export function toPosixPath(path: string): string {
  * @param rootPath the root path.
  * @returns the eslint installation or the unresolved command eslint.
  */
+// @CORE: 查找eslint安装路径
 export async function findEslint(rootPath: string): Promise<string> {
 	const platform = process.platform;
 	if (platform === 'win32' && await existFile(path.join(rootPath, 'node_modules', '.bin', 'eslint.cmd'))) {
@@ -317,6 +318,7 @@ interface Waiting<T> {
 /**
  * A semaphore implementation.
  */
+// @DATA: 信号量实现, 确保只有一个任务在运行
 export class Semaphore<T = void> {
 
 	private _capacity: number;

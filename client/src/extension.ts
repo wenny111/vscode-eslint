@@ -66,20 +66,24 @@ let acknowledgePerformanceStatus: () => void;
 const taskProvider: TaskProvider = new TaskProvider();
 const validator: Validator = new Validator();
 
+// @CORE: 扩展激活入口，实现延迟激活机制
 export function activate(context: ExtensionContext) {
 
 	function didOpenTextDocument(textDocument: TextDocument) {
 		if (activated) {
 			return;
 		}
+		// @CORE: 验证文档是否需要 ESLint 处理
 		if (validator.check(textDocument) !== Validate.off) {
 			openListener.dispose();
 			configurationListener.dispose();
 			activated = true;
+			// @CORE: 延迟激活 ESLint 扩展
 			realActivate(context);
 		}
 	}
 
+	// @CORE: 配置变更时检查是否需要激活
 	function configurationChanged() {
 		if (activated) {
 			return;
@@ -123,6 +127,7 @@ export function activate(context: ExtensionContext) {
 	configurationChanged();
 }
 
+// @CORE: 真正激活 ESLint 扩展，创建 LSP 客户端并启动服务器
 function realActivate(context: ExtensionContext): void {
 
 	if (onActivateCommands) {
@@ -130,6 +135,7 @@ function realActivate(context: ExtensionContext): void {
 		onActivateCommands = undefined;
 	}
 
+	// @CORE: 创建 ESLint LSP 客户端（会启动服务器进程）
 	[client, acknowledgePerformanceStatus] = ESLintClient.create(context, validator);
 
 	context.subscriptions.push(
@@ -162,6 +168,7 @@ function realActivate(context: ExtensionContext): void {
 		})
 	);
 
+	// @CORE: 启动 LSP 客户端（会启动服务器进程并通过 IPC 连接）
 	client.start().catch((error) => {
 		client.error(`Starting the server failed.`, error, 'force');
 		const message = typeof error === 'string' ? error : typeof error.message === 'string' ? error.message : undefined;

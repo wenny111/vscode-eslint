@@ -10,7 +10,7 @@ import {
 	workspace as Workspace, window as Window, languages as Languages, Uri, TextDocument, CodeActionContext, Diagnostic,
 	Command, CodeAction, MessageItem, ConfigurationTarget, env as Env, CodeActionKind, WorkspaceConfiguration, NotebookCell, commands,
 	ExtensionContext, LanguageStatusItem, LanguageStatusSeverity, DocumentFilter as VDocumentFilter
-} from 'vscode';
+} from 'vscode'; // 按需加载
 
 import {
 	LanguageClient, LanguageClientOptions, TransportKind, ErrorHandler, CloseAction, RevealOutputChannelOn, ServerOptions,
@@ -24,6 +24,7 @@ import { CodeActionSettings, CodeActionsOnSaveMode, CodeActionsOnSaveOptions, Co
 import { convert2RegExp, Is, Semaphore, toOSPath, toPosixPath } from './node-utils';
 import { pickFolder } from './vscode-utils';
 
+// 校验是否启用eslint的相关配置
 export class Validator {
 
 	private readonly probeFailed: Set<string> = new Set();
@@ -134,16 +135,18 @@ export namespace ESLintClient {
 		export const defaultValue: PerformanceStatus = { firstReport: true, validationTime: 0, fixTime: 0, reported: 0, acknowledged: false };
 	}
 
-	export function create(context: ExtensionContext, validator: Validator): [LanguageClient, () => void] {
 
+	// @CORE: 创建 ESLint LSP 客户端，配置服务器选项和客户端选项
+	export function create(context: ExtensionContext, validator: Validator): [LanguageClient, () => void] {
 		// Filters for client options
+		// @Q: schema 怎样用来过滤文件？
 		const packageJsonFilter: VDocumentFilter = { scheme: 'file', pattern: '**/package.json' };
 		const configFileFilter: VDocumentFilter = { scheme: 'file', pattern: '**/{.eslintr{c.js,c.yaml,c.yml,c,c.json},eslint.confi{g.js,g.mjs,g.cjs}}' };
 		const supportedQuickFixKinds: Set<string> = new Set([CodeActionKind.Source.value, CodeActionKind.SourceFixAll.value, `${CodeActionKind.SourceFixAll.value}.eslint`, CodeActionKind.QuickFix.value]);
 
-		// A map of documents synced to the server
+		// @DATA: 已同步到服务器的文档映射（URI -> TextDocument），用于跟踪哪些文档需要验证
 		const syncedDocuments: Map<string, TextDocument> = new Map();
-		// The actual ESLint client
+		// @CORE: 创建 LanguageClient 实例（管理 LSP 通信和服务器进程）
 		const client: LanguageClient = new LanguageClient('ESLint', createServerOptions(context.extensionUri), createClientOptions());
 
 		// The default error handler.
@@ -153,13 +156,14 @@ export namespace ESLintClient {
 		let serverCalledProcessExit: boolean = false;
 
 		// A semaphore to ensure we are only running one migration at a time
+		// @Q: 互斥锁？信号量？确保只有一个任务在运行？ migration 如何理解？
 		const migrationSemaphore: Semaphore<void> = new Semaphore<void>(1);
 		// The actual migration code if any.
 		let migration: Migration | undefined;
 		// Whether migration should happen now
 		let notNow: boolean = false;
 
-		// The client's status bar item.
+		// @DATA：The client's status bar item. 状态栏图标item
 		const languageStatus: LanguageStatusItem = Languages.createLanguageStatusItem('eslint.languageStatusItem', []);
 		let serverRunning: boolean | undefined;
 
@@ -169,9 +173,11 @@ export namespace ESLintClient {
 		languageStatus.name = 'ESLint';
 		languageStatus.text = 'ESLint';
 		languageStatus.command = { title: 'Open ESLint Output', command: 'eslint.showOutputChannel' };
+		// @DATA: 文档状态映射（URI -> StatusInfo），存储每个文档的验证状态
 		type StatusInfo = Omit<Omit<StatusParams, 'uri'>, 'validationTime'> & {
 		};
 		const documentStatus: Map<string, StatusInfo> = new Map();
+		// @DATA: 性能状态映射（LanguageId -> PerformanceStatus），跟踪不同语言的性能指标
 		const performanceStatus: Map<string, PerformanceStatus> = new Map();
 
 		// If the workspace configuration changes we need to update the synced documents since the
@@ -192,6 +198,8 @@ export namespace ESLintClient {
 			}
 		}));
 
+		//@CORE: 处理和 server 的通信
+		// @DATA: 单向通信：client 发送通知给 server，server 不会返回响应
 		client.onNotification(ShowOutputChannel.type, () => {
 			client.outputChannel.show();
 		});
@@ -395,8 +403,10 @@ export namespace ESLintClient {
 			return uri.fsPath;
 		}
 
+		// @CORE: 创建服务器选项
+		// @CORE: 创建服务器选项，指定服务器入口文件和 IPC 传输方式
 		function createServerOptions(extensionUri: Uri): ServerOptions {
-			const serverModule = Uri.joinPath(extensionUri, 'server', 'out', 'eslintServer.js').fsPath;
+			const serverModule = Uri.joinPath(extensionUri, 'server', 'out', 'eslintServer.js').fsPath; // 服务器入口文件
 			const eslintConfig = Workspace.getConfiguration('eslint');
 			const debug = sanitize(eslintConfig.get<boolean>('debug', false) ?? false, 'boolean', false);
 			const runtime = sanitize(eslintConfig.get<string | null>('runtime', null) ?? undefined, 'string', undefined);
@@ -430,6 +440,7 @@ export namespace ESLintClient {
 			return value;
 		}
 
+		// @CORE: 创建客户端选项，配置文档选择器、中间件、诊断拉取等
 		function createClientOptions(): LanguageClientOptions {
 			const clientOptions: LanguageClientOptions = {
 				documentSelector: [{ scheme: 'file' }, { scheme: 'untitled' }],
@@ -477,10 +488,14 @@ export namespace ESLintClient {
 					},
 					onTabs: false
 				},
+				// @CORE: 中间件层，拦截和增强 LSP 请求（过滤文档、诊断等）
 				middleware: {
+					// @CORE: 拦截文档打开，只同步需要验证的文档到服务器
 					didOpen: async (document, next) => {
+						console.log('didOpen', document.uri.toString());
 						if (Languages.match(packageJsonFilter, document) || Languages.match(configFileFilter, document) || validator.check(document) !== Validate.off) {
 							const result = next(document);
+							// @DATA: 将文档添加到同步映射，文档内容通过 LSP 同步到服务器
 							syncedDocuments.set(document.uri.toString(), document);
 
 							return result;
@@ -491,6 +506,7 @@ export namespace ESLintClient {
 							return next(event);
 						}
 					},
+					// 保存拦截器
 					willSave: async (event, next) => {
 						if (syncedDocuments.has(event.document.uri.toString())) {
 							return next(event);
@@ -544,6 +560,8 @@ export namespace ESLintClient {
 							return next(document, cells);
 						}
 					},
+					// @CORE: 核心拦截器，负责将 server 传过来的原始数据进行处理，然后返回给 client
+					// @CORE: 拦截代码操作请求，过滤只处理 ESLint 诊断，并监控性能
 					provideCodeActions: async (document, range, context, token, next): Promise<(Command | CodeAction)[] | null | undefined> => {
 						if (!syncedDocuments.has(document.uri.toString())) {
 							return [];
@@ -554,6 +572,7 @@ export namespace ESLintClient {
 						if (context.only === undefined && (!context.diagnostics || context.diagnostics.length === 0)) {
 							return [];
 						}
+						// @DATA: 过滤出 ESLint 诊断（从服务器返回的诊断中筛选 source === 'eslint' 的）
 						const eslintDiagnostics: Diagnostic[] = [];
 						for (const diagnostic of context.diagnostics) {
 							if (diagnostic.source === 'eslint') {
@@ -563,8 +582,10 @@ export namespace ESLintClient {
 						if (context.only === undefined && eslintDiagnostics.length === 0) {
 							return [];
 						}
+						// @DATA: 构建新的代码操作上下文，只包含 ESLint 诊断
 						const newContext: CodeActionContext = Object.assign({}, context, { diagnostics: eslintDiagnostics });
 						const start = Date.now();
+						// @CORE: 转发到服务器处理代码操作
 						const result = await next(document, range, newContext, token);
 						if (context.only?.value.startsWith('source.fixAll')) {
 							let performanceInfo = performanceStatus.get(document.languageId);
@@ -579,6 +600,7 @@ export namespace ESLintClient {
 						}
 						return result;
 					},
+					// 工作区拦截器，主要是处理工作区配置的变更
 					workspace: {
 						didChangeWatchedFile: (event, next) => {
 							validator.clear();

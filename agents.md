@@ -1,3 +1,4 @@
+// @LEARN:  给 agents 阅读的
 ## High-Level Overview
 
 The extension integrates ESLint into VS Code by implementing a ESLint server using the [Language Server Protocol (LSP)](https://microsoft.github.io/language-server-protocol/).

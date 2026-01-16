@@ -29,6 +29,7 @@ import LanguageDefaults from './languageDefaults';
 /**
  * ESLint specific settings for a text document.
  */
+// 声明合并
 export type TextDocumentSettings = Omit<ConfigurationSettings, 'workingDirectory'>  & {
 	silent: boolean;
 	workingDirectory: DirectoryItem | undefined;
@@ -36,7 +37,12 @@ export type TextDocumentSettings = Omit<ConfigurationSettings, 'workingDirectory
 	resolvedGlobalPackageManagerPath: string | undefined;
 };
 
+// 声明合并
 export namespace TextDocumentSettings {
+	// 类型守卫（会在语句的块级作用域内「收紧」变量的类型，缩小变量的类型范围）, 判断 settings 是否包含 libraryPath
+	// - 运行时检查：`settings.library !== undefined`
+	// - 类型收窄：`settings is ...` 语法？
+	// - 类型安全：TypeScript 自动收窄类型
 	export function hasLibrary(settings: TextDocumentSettings): settings is (TextDocumentSettings & { library: ESLintModule }) {
 		return settings.library !== undefined;
 	}
@@ -234,6 +240,7 @@ export type FixableProblem = Problem & {
 };
 
 export namespace FixableProblem {
+	// @DATA: 将修复信息转换为 TextEdit：ESLint fix 对象（range + text）→ LSP TextEdit（Range + newText）
 	export function createTextEdit(document: TextDocument, editInfo: FixableProblem): TextEdit {
 		return TextEdit.replace(Range.create(document.positionAt(editInfo.edit.range[0]), document.positionAt(editInfo.edit.range[1])), editInfo.edit.text || '');
 	}
@@ -244,11 +251,16 @@ export type SuggestionsProblem = Problem & {
 };
 
 export namespace SuggestionsProblem {
+	// @DATA: 将建议信息转换为 TextEdit：ESLint suggestion.fix → LSP TextEdit
 	export function createTextEdit(document: TextDocument, suggestion: ESLintSuggestionResult): TextEdit {
 		return TextEdit.replace(Range.create(document.positionAt(suggestion.fix.range[0]), document.positionAt(suggestion.fix.range[1])), suggestion.fix.text || '');
 	}
 }
 
+// @Q: ESLintClass接口, 将官方API接口统一? 统一接口，内部可能是：
+// - new ESLint().lintText()
+// - new CLIEngine().executeOnText()（通过模拟器）
+// interface 定义所有 ESLint 实例必须实现的方法
 interface ESLintClass extends Object {
 	// https://eslint.org/docs/developer-guide/nodejs-api#-eslintlinttextcode-options
 	lintText(content: string, options: {filePath?: string; warnIgnored?: boolean}): Promise<ESLintDocumentReport[]>;
@@ -261,6 +273,33 @@ interface ESLintClass extends Object {
 	// Whether it is the old CLI Engine
 	isCLIEngine?: boolean;
 }
+
+// @LEARN: 同CLIEngine, 同名，声明合并, 是TypeScript 官方推荐模式
+// 好处有： 将类型定义和工具函数组织在一起，集中管理相关功能，避免分散在多个文件中，提高代码可读性；工具函数享受类型检查；
+
+// 合并后，ESLintClass 既有：
+// - 实例方法：lintText, isPathIgnored, ...
+// - 静态方法：getConfigType
+// namespace 定义静态方法, 提供操作 ESLint 实例的工具函数
+
+
+// | 声明类型 | 可以合并 |
+// |---------|---------|
+// | interface + interface | ✅ |
+// | interface + namespace | ✅ |
+// | namespace + namespace | ✅ |
+// | class + interface | ✅ |
+// | class + namespace | ✅ |
+// | enum + namespace | ✅ |
+
+
+// 其他方案：类静态方法（不适用）
+// class ESLintClass {
+//     static getConfigType(eslint: ESLintClass): ... { ... }
+// }
+// **问题：**
+// - ❌ ESLintClass 不是类，是接口
+// - ❌ 不能强制所有实现都提供静态方法
 
 namespace ESLintClass {
 	export function getConfigType(eslint: ESLintClass): 'eslintrc' | 'flat' {
@@ -285,6 +324,7 @@ interface CLIEngineConstructor {
 /**
  * A loaded ESLint npm module.
  */
+// @DATA: 加载不同版本的eslint模块类型定义
 export type ESLintModule =
 {
 	// version < 7.0
@@ -303,6 +343,7 @@ export type ESLintModule =
 	CLIEngine: undefined;
 	loadESLint?: (options?: { cwd?: string; useFlatConfig?: boolean }) => Promise<ESLintClassConstructor>;
 };
+
 
 export namespace ESLintModule {
 	export function hasLoadESLint(value: ESLintModule): value is { ESLint: ESLintClassConstructor; CLIEngine: undefined; loadESLint: (options?: { cwd?: string; useFlatConfig?: boolean }) => Promise<ESLintClassConstructor> } {
@@ -331,6 +372,7 @@ namespace RuleData {
 	}
 }
 
+// @DATA: CLIEngine接口, 使用CLIEngine模拟ESLintClass
 interface CLIEngine {
 	executeOnText(content: string, file?: string, warn?: boolean): ESLintReport;
 	isPathIgnored(path: string): boolean;
@@ -339,6 +381,10 @@ interface CLIEngine {
 	getConfigForFile?(path: string): ESLintConfig;
 }
 
+// @LEARN: 同ESLintClass, 同名，声明合并, 是优雅的解决方案
+// 合并后，CLIEngine 既有：
+// - 实例方法：executeOnText, isPathIgnored, ...
+// - 静态方法：hasRule
 namespace CLIEngine {
 	export function hasRule(value: CLIEngine): value is CLIEngine & { getRules(): Map<string, RuleData> } {
 		return value.getRules !== undefined;
@@ -348,6 +394,7 @@ namespace CLIEngine {
 /**
  * ESLint class emulator using CLI Engine.
  */
+// @DATA: 模拟ESLintClass, 使用CLIEngine
 class ESLintClassEmulator implements ESLintClass {
 
 	private cli: CLIEngine;
@@ -595,20 +642,23 @@ export namespace RuleSeverities {
  * Creates LSP Diagnostics and captures code action information.
  */
 namespace Diagnostics {
-
+	// @DATA: 计算诊断的唯一 key（用于在 CodeActions Map 中存储和检索修复信息）
 	export function computeKey(diagnostic: Diagnostic): string {
 		const range = diagnostic.range;
 		let message: string | undefined;
 		if (diagnostic.message) {
-			const hash  = crypto.createHash('sha256');
+			const hash  = crypto.createHash('sha256'); // 使用 SHA-256 算法
 			hash.update(diagnostic.message);
 			message = hash.digest('base64');
 		}
+		// @DATA: key 格式：[行,列,结束行,结束列]-规则ID-消息哈希
 		return `[${range.start.line},${range.start.character},${range.end.line},${range.end.character}]-${diagnostic.code}-${message ?? ''}`;
 	}
 
+	// @DATA: 将 ESLint 问题转换为 LSP 诊断：ESLintProblem → Diagnostic（包含位置、严重性、消息等）
 	export function create(settings: TextDocumentSettings, problem: ESLintProblem, document: TextDocument): [Diagnostic, RuleSeverity | undefined] {
 		const message = problem.message;
+		// @DATA: 转换位置信息：ESLint 的 1-based line/column → LSP 的 0-based Position
 		const startLine = typeof problem.line !== 'number' || Number.isNaN(problem.line) ? 0 : Math.max(0, problem.line - 1);
 		const startChar = typeof problem.column !== 'number' || Number.isNaN(problem.column) ? 0 : Math.max(0, problem.column - 1);
 		let endLine = typeof problem.endLine !== 'number' || Number.isNaN(problem.endLine) ? startLine : Math.max(0, problem.endLine - 1);
@@ -629,9 +679,10 @@ namespace Diagnostics {
 		}
 
 		const override = RuleSeverities.getOverride(problem.ruleId, settings.rulesCustomizations, problem.fix !== undefined);
+		// @DATA: 构建 LSP Diagnostic 对象
 		const result: Diagnostic = {
 			message: message,
-			severity: convertSeverityToDiagnosticWithOverride(problem.severity, override),
+			severity: convertSeverityToDiagnosticWithOverride(problem.severity, override),  // @DATA: ESLint severity (1/2) → LSP DiagnosticSeverity
 			source: 'eslint',
 			range: {
 				start: { line: startLine, character: startChar },
@@ -685,6 +736,7 @@ namespace Diagnostics {
 		}
 	}
 
+	// 将 ESLint 的 severity 转换为 LSP 的 DiagnosticSeverity
 	function convertSeverityToDiagnostic(severity: number | RuleSeverity) {
 	// RuleSeverity concerns an overridden rule. A number is direct from ESLint.
 		switch (severity) {
@@ -711,7 +763,9 @@ namespace Diagnostics {
 /**
  * Capture information necessary to compute code actions.
  */
+// @DATA: 修复信息存储（URI -> Map<DiagnosticKey, Problem>），在验证阶段存储，在代码操作阶段读取
 export namespace CodeActions {
+	// @DATA: 两层 Map 结构：外层 key 是文档 URI，内层 key 是诊断的 key，value 是修复信息（Problem）
 	const codeActions: Map<string, Map<string, Problem>> = new Map<string, Map<string, Problem>>();
 
 	export function get(uri: string): Map<string, Problem> | undefined {
@@ -726,6 +780,7 @@ export namespace CodeActions {
 		return codeActions.delete(uri);
 	}
 
+	// @DATA: 存储修复信息：ESLint 问题 + 诊断 → Problem 对象 → 存储到 CodeActions Map
 	export function record(document: TextDocument, diagnostic: Diagnostic, problem: ESLintProblem): void {
 		if (!problem.ruleId) {
 			return;
@@ -736,28 +791,30 @@ export namespace CodeActions {
 			edits = new Map<string, Problem>();
 			CodeActions.set(uri, edits);
 		}
+		// @DATA: 使用诊断的 key 作为内层 Map 的 key，存储包含 fix、suggestions 的 Problem 对象
 		edits.set(Diagnostics.computeKey(diagnostic), {
 			label: `Fix this ${problem.ruleId} problem`,
 			documentVersion: document.version,
 			ruleId: problem.ruleId,
 			line: problem.line,
 			diagnostic: diagnostic,
-			edit: problem.fix,
-			suggestions: problem.suggestions
+			edit: problem.fix,  // @DATA: ESLint 的 fix 对象（包含 range 和 text）
+			suggestions: problem.suggestions  // @DATA: ESLint 的 suggestions 数组
 		});
 	}
 }
+
 
 /**
  * Wrapper round the ESLint npm module.
  */
 export namespace ESLint {
 
-	let connection: ProposedFeatures.Connection;
+	let connection: ProposedFeatures.Connection; // 连接: language server 的连接?
 	let documents: TextDocuments<TextDocument>;
 	let inferFilePath: (documentOrUri: string | TextDocument | URI | undefined, useRealpaths: boolean) => string | undefined;
 	let loadNodeModule: <T>(moduleName: string) => T | undefined;
-
+	// 语言ID到解析器的映射
 	const languageId2ParserRegExp: Map<string, RegExp[]> = function createLanguageId2ParserRegExp() {
 		const result = new Map<string, RegExp[]>();
 		const typescript = /\/@typescript-eslint\/parser\//;
@@ -824,6 +881,7 @@ export namespace ESLint {
 	const document2Settings: Map<string, Promise<TextDocumentSettings>> = new Map<string, Promise<TextDocumentSettings>>();
 	const formatterRegistrations: Map<string, Promise<Disposable>> = new Map();
 
+	// 初始化eslint, 传入连接、文档、文件路径推断函数、加载模块函数(动态加载eslint)
 	export function initialize($connection: ProposedFeatures.Connection, $documents: TextDocuments<TextDocument>, $inferFilePath: (documentOrUri: string | TextDocument | URI | undefined, useRealpaths: boolean) => string | undefined, $loadNodeModule: <T>(moduleName: string) => T | undefined) {
 		connection = $connection;
 		documents = $documents;
@@ -831,6 +889,7 @@ export namespace ESLint {
 		loadNodeModule = $loadNodeModule;
 	}
 
+	// 删除文件的设置
 	export function removeSettings(key: string): boolean {
 		return document2Settings.delete(key);
 	}
@@ -854,12 +913,14 @@ export namespace ESLint {
 		formatterRegistrations.clear();
 	}
 
+	// @CORE: 解析文档设置（包含动态加载 ESLint 库、解析工作目录、配置等）
 	export function resolveSettings(document: TextDocument): Promise<TextDocumentSettings> {
 		const uri = document.uri;
 		let resultPromise = document2Settings.get(uri);
 		if (resultPromise) {
 			return resultPromise;
 		}
+		// @DATA: 通过 LSP workspace/configuration 请求从客户端获取配置（按资源作用域）
 		resultPromise = connection.workspace.getConfiguration({ scopeUri: uri, section: '' }).then((configuration: ConfigurationSettings) => {
 			const settings: TextDocumentSettings = Object.assign(
 				{},
@@ -924,6 +985,14 @@ export namespace ESLint {
 			// See: https://eslint.org/blog/2022/08/new-config-system-part-3/
 			const eslintPath = settings.experimental?.useFlatConfig ? 'eslint/use-at-your-own-risk' : 'eslint';
 			if (nodePath !== undefined) {
+				// @DATA: 解析eslint路径, 从工作区 node_modules 向上查找
+				// 文件所在目录/node_modules/eslint
+				// ↓ 找不到，向上
+				// 父目录/node_modules/eslint
+				// ↓ 找不到，向上
+				// 工作区根目录/node_modules/eslint
+				// ↓ 找不到，尝试全局
+				// 全局 node_modules/eslint
 				promise = Files.resolve(eslintPath, nodePath, nodePath, trace).then<string, string>(undefined, () => {
 					return Files.resolve(eslintPath, settings.resolvedGlobalPackageManagerPath, moduleResolveWorkingDirectory, trace);
 				});
@@ -957,6 +1026,7 @@ export namespace ESLint {
 							path2Library.set(libraryPath, library);
 						}
 					} else {
+						// @CORE: 动态加载标准 ESLint API
 						library = loadNodeModule(libraryPath);
 						if (library === undefined) {
 							settings.validate = Validate.off;
@@ -969,6 +1039,7 @@ export namespace ESLint {
 						} else {
 							connection.console.info(`ESLint library loaded from: ${libraryPath}`);
 							settings.library = library;
+							// @CORE: 缓存已加载的库（避免重复加载）
 							path2Library.set(libraryPath, library);
 						}
 					}
@@ -987,6 +1058,7 @@ export namespace ESLint {
 				}
 				if (settings.validate === Validate.probe && TextDocumentSettings.hasLibrary(settings)) {
 					settings.validate = Validate.off;
+					// @DATA: 获取需要校验的文件路径
 					const filePath = ESLint.getFilePath(document, settings);
 					if (filePath !== undefined) {
 						const parserRegExps = languageId2ParserRegExp.get(document.languageId);
@@ -1120,24 +1192,31 @@ export namespace ESLint {
 		return resultPromise;
 	}
 
+	// @DATA: 创建ESLintClass实例
+	// @CORE: 创建 ESLint 实例，统一不同版本的 API（CLIEngine vs ESLint Class）
 	export async function newClass(library: ESLintModule, newOptions: ESLintClassOptions | CLIOptions, settings: TextDocumentSettings): Promise<ESLintClass> {
 		// Since ESLint version 8.57 we have a dedicated loadESLint function
 		// which takes care of loading the right ESLint class. We available
 		// we use it.
+		// @CORE: ESLint 8.57+ 使用 loadESLint（支持 Flat Config）
 		if (ESLintModule.hasLoadESLint(library)) {
 			return new (await library.loadESLint({ useFlatConfig: settings.useFlatConfig }))(newOptions);
 		}
 		// If we have version 7 where we have both ESLint class and CLIEngine we only
 		// use the ESLint class if a corresponding setting (useESLintClass) is set.
+		// @CORE: ESLint 7.x 根据设置选择 API
 		if (ESLintModule.hasESLintClass(library) && settings.useESLintClass) {
 			return new library.ESLint(newOptions);
 		}
+		// @CORE: ESLint < 7.0 使用 CLIEngine（通过模拟器统一接口）
 		if (ESLintModule.hasCLIEngine(library)) {
 			return new ESLintClassEmulator(new library.CLIEngine(newOptions));
 		}
+		// @CORE: 默认使用 ESLint Class
 		return new library.ESLint(newOptions);
 	}
 
+	// 创建ESLintClass实例
 	export async function withClass<T>(func: (eslintClass: ESLintClass) => Promise<T>, settings: TextDocumentSettings & { library: ESLintModule }, options?: ESLintClassOptions | CLIOptions): Promise<T> {
 		const newOptions: ESLintClassOptions | CLIOptions = options === undefined
 			? Object.assign(Object.create(null), settings.options)
@@ -1154,7 +1233,7 @@ export namespace ESLint {
 					process.chdir(newCWD);
 				}
 			}
-
+			// @DATA: 创建ESLintClass实例
 			const eslintClass = await newClass(settings.library, newOptions, settings);
 			// We need to await the result to ensure proper execution of the
 			// finally block.
@@ -1195,7 +1274,9 @@ export namespace ESLint {
 		}
 	}
 
+	// Set 存储了这些自动修复类型的枚举值
 	const validFixTypes = new Set<string>(['problem', 'suggestion', 'layout', 'directive']);
+
 	export async function validate(document: TextDocument, settings: TextDocumentSettings & { library: ESLintModule }): Promise<Diagnostic[]> {
 		const newOptions: CLIOptions = Object.assign(Object.create(null), settings.options);
 		let fixTypes: Set<string> | undefined = undefined;
@@ -1215,16 +1296,19 @@ export namespace ESLint {
 		const uri = document.uri;
 		const file = getFilePath(document, settings);
 
+		// @CORE: 执行 ESLint 验证，返回诊断结果并记录修复信息
 		return withClass(async (eslintClass) => {
 			CodeActions.remove(uri);
+			// @DATA: ESLint API 返回报告（包含 messages、fix、suggestions）
 			const reportResults: ESLintDocumentReport[] = await eslintClass.lintText(content, { filePath: file, warnIgnored: settings.onIgnoredFiles !== ESLintSeverity.off });
 			RuleMetaData.capture(eslintClass, reportResults);
-			const diagnostics: Diagnostic[] = [];
+			const diagnostics: Diagnostic[] = []; // @DATA: 诊断结果数组，将返回给客户端
 			if (reportResults && Array.isArray(reportResults) && reportResults.length > 0) {
 				const docReport = reportResults[0];
 				if (docReport.messages && Array.isArray(docReport.messages)) {
 					docReport.messages.forEach((problem) => {
 						if (problem) {
+							// @DATA: ESLint 问题（ESLintProblem）→ LSP 诊断（Diagnostic）
 							const [diagnostic, override] = Diagnostics.create(settings, problem, document);
 							if (!(override === RuleSeverity.off || (settings.quiet && (diagnostic.severity === DiagnosticSeverity.Warning || diagnostic.severity === DiagnosticSeverity.Information)))) {
 								diagnostics.push(diagnostic);
@@ -1232,6 +1316,7 @@ export namespace ESLint {
 							if (fixTypes !== undefined && problem.ruleId !== undefined && problem.fix !== undefined) {
 								const type = RuleMetaData.getType(problem.ruleId);
 								if (type !== undefined && fixTypes.has(type)) {
+									// @DATA: 存储修复信息：problem.fix + diagnostic → CodeActions Map
 									CodeActions.record(document, diagnostic, problem);
 								}
 							} else {
@@ -1239,12 +1324,14 @@ export namespace ESLint {
 									problem.ruleId = RuleMetaData.unusedDisableDirectiveId;
 								}
 
+								// @DATA: 存储所有问题的修复信息（包括 fix 和 suggestions）
 								CodeActions.record(document, diagnostic, problem);
 							}
 						}
 					});
 				}
 			}
+			// @DATA: 返回诊断数组，通过 LSP 发送给客户端
 			return diagnostics;
 		}, settings);
 	}

@@ -1,9 +1,10 @@
 const globals = require('globals');
 const typescriptParser =  require('@typescript-eslint/parser');
 const typescriptPlugin = require('@typescript-eslint/eslint-plugin');
+const js = require('@eslint/js');
 
 module.exports = [
-	"eslint:recommended",
+	js.configs.recommended,
 	{
 		files: ["**/*.js"],
 		languageOptions: {

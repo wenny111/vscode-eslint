@@ -31,6 +31,7 @@ import LanguageDefaults from './languageDefaults';
 
 // The connection to use. Code action requests get removed from the queue if
 // canceled.
+// @CORE: 创建 LSP 服务器连接（监听 stdin，写入 stdout，处理 JSON-RPC 消息）
 const connection: ProposedFeatures.Connection = createConnection(ProposedFeatures.all, {
 	connectionStrategy: {
 		cancelUndispatched: (message: LMessage) => {
@@ -149,6 +150,7 @@ function inferFilePath(documentOrUri: string | TextDocument | URI | undefined, u
 	return undefined;
 }
 
+// @CORE: 初始化 ESLint 封装层，注入依赖（连接、文档管理器、路径推断、动态加载函数）
 ESLint.initialize(connection, documents, inferFilePath, loadNodeModule);
 SaveRuleConfigs.inferFilePath = inferFilePath;
 
@@ -181,6 +183,7 @@ namespace CommandIds {
 	export const openRuleDoc: string = 'eslint.openRuleDoc';
 }
 
+// @CORE: 处理初始化请求
 connection.onInitialize((params, _cancel, progress) => {
 	progress.begin('Initializing ESLint Server');
 	const syncKind: TextDocumentSyncKind = TextDocumentSyncKind.Incremental;
@@ -248,21 +251,28 @@ const emptyDiagnosticResult: FullDocumentDiagnosticReport = {
 	items: []
 };
 
+// @CORE: 处理诊断拉取请求（LSP DocumentDiagnosticRequest）
 connection.languages.diagnostics.on(async (params) => {
 	const document = documents.get(params.textDocument.uri);
 	if (document === undefined) {
 		return emptyDiagnosticResult;
 	}
 
+	// @CORE: 解析文档设置（包含动态加载 ESLint 库）
+	// @DATA: 从客户端读取配置（通过 LSP workspace/configuration），解析为 TextDocumentSettings
 	const settings = await ESLint.resolveSettings(document);
 	if (settings.validate !== Validate.on || !TextDocumentSettings.hasLibrary(settings)) {
 		return emptyDiagnosticResult;
 	}
 	try {
 		const start = Date.now();
+		// @CORE: 执行 ESLint 验证，返回诊断结果
+		// @DATA: 返回诊断数组（Diagnostic[]），包含错误、警告、信息等
 		const diagnostics = await ESLint.validate(document, settings);
 		const timeTaken = Date.now() - start;
+		// @DATA: 发送状态通知给客户端（包含验证时间）
 		void connection.sendNotification(StatusNotification.type, { uri: document.uri, state: Status.ok, validationTime: timeTaken });
+		// @DATA: 返回诊断报告（LSP DocumentDiagnosticReport），包含诊断数组
 		return {
 			kind: DocumentDiagnosticReportKind.Full,
 			items: diagnostics
@@ -307,6 +317,7 @@ connection.onDidChangeWatchedFiles(async (params) => {
 		if (dirname) {
 			const data = ESLint.ErrorHandlers.getConfigErrorReported(fsPath);
 			if (data !== undefined) {
+				// @DATA: 创建ESLintClass实例
 				const eslintClass = await ESLint.newClass(data.library, {}, data.settings);
 				try {
 					await eslintClass.lintText('', { filePath: path.join(dirname, '___test___.js') });
@@ -330,6 +341,7 @@ type RuleCodeActions = {
 	showDocumentation?: CodeAction;
 };
 
+// @DATA: 自动修复结果
 class CodeActionResult {
 	private _actions: Map<string, RuleCodeActions>;
 	private _fixAll: CodeAction[] | undefined;
@@ -438,9 +450,11 @@ namespace CommandParams {
 	}
 }
 
+// @DATA: 存储代码操作对应的 WorkspaceChange（key: commandId:ruleId，value: WorkspaceChange）
 const changes = new Changes();
 const ESLintSourceFixAll: string = `${CodeActionKind.SourceFixAll}.eslint`;
 
+// @CORE: 处理代码操作请求（LSP textDocument/codeAction），生成修复、禁用规则、建议等操作
 connection.onCodeAction(async (params) => {
 	const result: CodeActionResult = new CodeActionResult();
 	const uri = params.textDocument.uri;
@@ -578,7 +592,8 @@ connection.onCodeAction(async (params) => {
 		return result.all();
 	}
 
-	const problems = CodeActions.get(uri);
+		// @DATA: 从 CodeActions 存储中获取该文档的修复信息（在验证阶段通过 CodeActions.record() 存储）
+		const problems = CodeActions.get(uri);
 	// We validate on type and have no problems ==> nothing to fix.
 	if (problems === undefined && settings.run === 'onType') {
 		return result.all();
@@ -587,9 +602,11 @@ connection.onCodeAction(async (params) => {
 	const only: string | undefined = params.context.only !== undefined && params.context.only.length > 0 ? params.context.only[0] : undefined;
 	const isSource = only === CodeActionKind.Source;
 	const isSourceFixAll = (only === ESLintSourceFixAll || only === CodeActionKind.SourceFixAll);
+	// @CORE: 处理 "Fix All" 类型的代码操作
 	if (isSourceFixAll || isSource) {
 		if (isSourceFixAll) {
 			const textDocumentIdentifier: VersionedTextDocumentIdentifier = { uri: textDocument.uri, version: textDocument.version };
+			// @CORE: 计算所有可修复的问题
 			const edits = await computeAllFixes(textDocumentIdentifier, AllFixesMode.onSave);
 			if (edits !== undefined) {
 				result.fixAll.push(CodeAction.create(
@@ -622,14 +639,18 @@ connection.onCodeAction(async (params) => {
 	const allFixableRuleIds: string[] = [];
 	const kind: CodeActionKind = only ?? CodeActionKind.QuickFix;
 
+	// @CORE: 遍历问题，为每个问题生成代码操作（修复、建议、禁用规则等）
 	for (const editInfo of fixes.getScoped(params.context.diagnostics)) {
 		documentVersion = editInfo.documentVersion;
 		const ruleId = editInfo.ruleId;
 		allFixableRuleIds.push(ruleId);
 
+		// @DATA: 生成单个修复操作：修复信息 → TextEdit → WorkspaceChange → 存储到 changes Map
 		if (Problem.isFixable(editInfo)) {
 			const workspaceChange = new WorkspaceChange();
+			// @DATA: 将修复信息转换为 TextEdit 并添加到 WorkspaceChange
 			workspaceChange.getTextEditChange({ uri, version: documentVersion }).add(FixableProblem.createTextEdit(textDocument, editInfo));
+			// @DATA: 存储 WorkspaceChange 到 changes Map，供 executeCommand 时使用
 			changes.set(`${CommandIds.applySingleFix}:${ruleId}`, workspaceChange);
 			const action = createCodeAction(
 				editInfo.label,
@@ -744,6 +765,7 @@ enum AllFixesMode {
 	command = 'command'
 }
 
+// @CORE: 计算所有可修复的问题，返回 TextEdit 数组
 async function computeAllFixes(identifier: VersionedTextDocumentIdentifier, mode: AllFixesMode): Promise<TextEdit[] | undefined> {
 	const uri = identifier.uri;
 	const textDocument = documents.get(uri)!;
@@ -762,13 +784,16 @@ async function computeAllFixes(identifier: VersionedTextDocumentIdentifier, mode
 	let start = Date.now();
 	// Only use known fixes when running in onSave mode. See https://github.com/microsoft/vscode-eslint/issues/871
 	// for details
-	if (mode === AllFixesMode.onSave && settings.codeActionOnSave.mode === CodeActionsOnSaveMode.problems) {
-		const result = problems !== undefined && problems.size > 0
-			? new Fixes(problems).getApplicable().map(fix => FixableProblem.createTextEdit(textDocument, fix))
-			: [];
+		// @DATA: 快速模式：从 CodeActions 存储中获取修复信息，直接转换为 TextEdit（不重新运行 ESLint）
+		if (mode === AllFixesMode.onSave && settings.codeActionOnSave.mode === CodeActionsOnSaveMode.problems) {
+			// @DATA: 修复信息（Problem）→ TextEdit[]
+			const result = problems !== undefined && problems.size > 0
+				? new Fixes(problems).getApplicable().map(fix => FixableProblem.createTextEdit(textDocument, fix))
+				: [];
 		connection.tracer.log(`Computing all fixes took: ${Date.now() - start} ms.`);
 		return result;
 	} else {
+		// @CORE: 完整模式：重新运行 ESLint 并计算所有修复
 		const saveConfig = filePath !== undefined && mode === AllFixesMode.onSave ? await SaveRuleConfigs.get(uri, settings) : undefined;
 		const offRules = saveConfig?.offRules;
 		const overrideOptions = saveConfig?.options;
@@ -785,17 +810,23 @@ async function computeAllFixes(identifier: VersionedTextDocumentIdentifier, mode
 				eslintOptions.overrideConfig = overrideConfig;
 			}
 		}
+		//
+		// @CORE: 使用 ESLint 执行修复（fix: true），然后计算差异
 		return ESLint.withClass(async (eslintClass) => {
 			// Don't use any precomputed fixes since neighbour fixes can produce incorrect results.
 			// See https://github.com/microsoft/vscode-eslint/issues/1745
 			const result: TextEdit[] = [];
+			// @DATA: 执行 lint 并自动修复，ESLint 返回修复后的完整内容（output）
 			const reportResults = await eslintClass.lintText(originalContent, { filePath });
 			connection.tracer.log(`Computing all fixes took: ${Date.now() - start} ms.`);
 			if (Array.isArray(reportResults) && reportResults.length === 1 && reportResults[0].output !== undefined) {
+				// @DATA: 获取修复后的完整内容
 				const fixedContent = reportResults[0].output;
 				start = Date.now();
+				// @DATA: 计算原始内容和修复后内容的差异（diff），生成最小编辑集合
 				const diffs = stringDiff(originalContent, fixedContent, false);
 				connection.tracer.log(`Computing minimal edits took: ${Date.now() - start} ms.`);
+				// @DATA: 将 diff 结果转换为 TextEdit[]（包含 range 和 newText）
 				for (const diff of diffs) {
 					result.push({
 						range: {
@@ -811,11 +842,14 @@ async function computeAllFixes(identifier: VersionedTextDocumentIdentifier, mode
 	}
 }
 
+// @CORE: 执行代码操作命令（LSP workspace/executeCommand），应用修复编辑
 connection.onExecuteCommand(async (params) => {
 	let workspaceChange: WorkspaceChange | undefined;
 	const commandParams: CommandParams = params.arguments![0] as CommandParams;
 	if (params.command === CommandIds.applyAllFixes) {
+		// @CORE: 计算所有修复
 		const edits = await computeAllFixes(commandParams, AllFixesMode.command);
+		// @DATA: 将 TextEdit[] 组装成 WorkspaceChange（包含多个 TextEdit）
 		if (edits !== undefined && edits.length > 0) {
 			workspaceChange = new WorkspaceChange();
 			const textChange = workspaceChange.getTextEditChange(commandParams);
@@ -839,6 +873,7 @@ connection.onExecuteCommand(async (params) => {
 	if (workspaceChange === undefined) {
 		return null;
 	}
+	// @DATA: 将 WorkspaceChange 转换为 WorkspaceEdit 并通过 LSP 发送给客户端应用
 	return connection.workspace.applyEdit(workspaceChange.edit).then((response) => {
 		if (!response.applied) {
 			connection.console.error(`Failed to apply command: ${params.command}`);
@@ -850,15 +885,18 @@ connection.onExecuteCommand(async (params) => {
 	});
 });
 
+// @CORE: 处理文档格式化请求（LSP textDocument/formatting）
 connection.onDocumentFormatting((params) => {
 	const textDocument = documents.get(params.textDocument.uri);
 	if (textDocument === undefined) {
 		return [];
 	}
+	// @CORE: 使用 ESLint 修复作为格式化
 	return computeAllFixes({ uri: textDocument.uri, version: textDocument.version }, AllFixesMode.format);
 });
 
 
+// @CORE: 开始监听 LSP 消息（stdin）
 documents.listen(connection);
 notebooks.listen(connection);
 connection.listen();
