@@ -1,20 +1,5 @@
 # VS Code ESLint 扩展 - 架构与调试指南
 
-## 1. 关于 agents.md
-
-### 1.1 文件定位
-`agents.md` 是这个项目的 **High-Level Overview** 文档，用于向 AI agents 提供项目概述。这不是像 `CHANGELOG.md` 那样的标准开源项目约定，而是这个项目特有的文档命名方式。
-
-### 1.2 文件分布
-项目中有多个 `agents.md` 文件，分别位于：
-- 根目录：整体项目概述
-- `client/agents.md`：客户端实现概述
-- `server/agents.md`：服务端实现概述
-
-这种结构允许 AI 工具快速理解不同模块的职责和设计决策。
-
----
-
 ## 2. 项目架构
 
 ### 2.1 整体架构模式
@@ -23,18 +8,18 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              VS Code Extension Host                      │
+│              VS Code Extension Host                     │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │  Client (client/src/)                           │   │
-│  │  - extension.ts: 扩展入口，延迟激活              │   │
+│  │  Client (client/src/)                            │   │
+│  │  - extension.ts: 扩展入口，延迟激活               │   │
 │  │  - client.ts: LSP 客户端实现                     │   │
 │  │  - settings.ts: 配置读取                         │   │
 │  │  - tasks.ts: 任务提供者                          │   │
 │  └──────────────────────────────────────────────────┘   │
-│                    ↕ LSP Protocol                        │
+│                    ↕ LSP Protocol                       │
 │  ┌──────────────────────────────────────────────────┐   │
-│  │  Server (独立 Node.js 进程)                      │   │
-│  │  - eslintServer.ts: LSP 服务器实现               │   │
+│  │  Server (独立 Node.js 进程)                       │   │
+│  │  - eslintServer.ts: LSP 服务器实现                │   │
 │  │  - eslint.ts: ESLint 封装与抽象                   │   │
 │  │  - 处理诊断、代码操作、格式化                     │   │
 │  └──────────────────────────────────────────────────┘   │
@@ -338,122 +323,122 @@ npm test              # 运行客户端测试
 
 ```
 1. extension.ts:activate()
-   @CORE: 扩展激活入口，实现延迟激活机制
+   扩展激活入口，实现延迟激活机制
    ↓
 2. extension.ts:didOpenTextDocument()
-   @CORE: 文档打开时检查是否需要激活
-   @CORE: 验证文档是否需要 ESLint 处理
-   ↓
+   文档打开时检查是否需要激活
+   验证文档是否需要 ESLint 处理
+   ↓`
 3. extension.ts:realActivate()
-   @CORE: 真正激活 ESLint 扩展，创建 LSP 客户端并启动服务器
+   真正激活 ESLint 扩展，创建 LSP 客户端并启动服务器
    ↓
 4. client.ts:ESLintClient.create()
-   @CORE: 创建 ESLint LSP 客户端，配置服务器选项和客户端选项
-   @CORE: 创建 LanguageClient 实例（管理 LSP 通信和服务器进程）
+   创建 ESLint LSP 客户端，配置服务器选项和客户端选项
+   创建 LanguageClient 实例（管理 LSP 通信和服务器进程）
    ↓
 5. client.ts:createServerOptions()
-   @CORE: 创建服务器选项，指定服务器入口文件和 IPC 传输方式
+   创建服务器选项，指定服务器入口文件和 IPC 传输方式
    ↓
 6. client.ts:createClientOptions()
-   @CORE: 创建客户端选项，配置文档选择器、中间件、诊断拉取等
+   创建客户端选项，配置文档选择器、中间件、诊断拉取等
    ↓
 7. extension.ts:client.start()
-   @CORE: 启动 LSP 客户端（会启动服务器进程并通过 IPC 连接）
+   启动 LSP 客户端（会启动服务器进程并通过 IPC 连接）
 ```
 
 ### 4.2 服务器初始化链路
 
 ```
 1. eslintServer.ts:createConnection()
-   @CORE: 创建 LSP 服务器连接（监听 stdin，写入 stdout，处理 JSON-RPC 消息）
+   创建 LSP 服务器连接（监听 stdin，写入 stdout，处理 JSON-RPC 消息）
    ↓
 2. eslintServer.ts:ESLint.initialize()
-   @CORE: 初始化 ESLint 封装层，注入依赖（连接、文档管理器、路径推断、动态加载函数）
+   初始化 ESLint 封装层，注入依赖（连接、文档管理器、路径推断、动态加载函数）
    ↓
 3. eslintServer.ts:connection.onInitialize()
-   @CORE: 处理初始化请求
+   处理初始化请求
    ↓
 4. eslintServer.ts:connection.listen()
-   @CORE: 开始监听 LSP 消息（stdin）
+   开始监听 LSP 消息（stdin）
 ```
 
 ### 4.3 诊断生成链路
 
 ```
 1. client.ts:middleware.didOpen()
-   @CORE: 拦截文档打开，只同步需要验证的文档到服务器
+   拦截文档打开，只同步需要验证的文档到服务器
    ↓
 2. eslintServer.ts:connection.languages.diagnostics.on()
-   @CORE: 处理诊断拉取请求（LSP DocumentDiagnosticRequest）
+   处理诊断拉取请求（LSP DocumentDiagnosticRequest）
    ↓
 3. eslint.ts:ESLint.resolveSettings()
-   @CORE: 解析文档设置（包含动态加载 ESLint 库、解析工作目录、配置等）
+   解析文档设置（包含动态加载 ESLint 库、解析工作目录、配置等）
    ↓
 4. eslint.ts:resolveSettings() 内部
-   @CORE: 从工作区 node_modules 向上查找 ESLint 库路径
-   @CORE: 动态加载 ESLint 库（从解析的路径）
-   @CORE: 使用动态 require 加载 ESLint 模块
-   @CORE: 动态加载标准 ESLint API
-   @CORE: 缓存已加载的库（避免重复加载）
+   从工作区 node_modules 向上查找 ESLint 库路径
+   动态加载 ESLint 库（从解析的路径）
+   使用动态 require 加载 ESLint 模块
+   动态加载标准 ESLint API
+   缓存已加载的库（避免重复加载）
    ↓
 5. eslint.ts:ESLint.validate()
-   @CORE: 执行 ESLint 验证，返回诊断结果并记录修复信息
+   执行 ESLint 验证，返回诊断结果并记录修复信息
    ↓
 6. eslint.ts:withClass()
-   @CORE: 统一接口执行 ESLint 操作（处理工作目录切换、版本抽象）
-   @CORE: 切换工作目录（如果需要）
-   @CORE: 创建 ESLint 实例并执行操作
-   @CORE: 恢复原始工作目录
+   统一接口执行 ESLint 操作（处理工作目录切换、版本抽象）
+   切换工作目录（如果需要）
+   创建 ESLint 实例并执行操作
+   恢复原始工作目录
    ↓
 7. eslint.ts:newClass()
-   @CORE: 创建 ESLint 实例，统一不同版本的 API（CLIEngine vs ESLint Class）
-   @CORE: ESLint 8.57+ 使用 loadESLint（支持 Flat Config）
-   @CORE: ESLint 7.x 根据设置选择 API
-   @CORE: ESLint < 7.0 使用 CLIEngine（通过模拟器统一接口）
-   @CORE: 默认使用 ESLint Class
+   创建 ESLint 实例，统一不同版本的 API（CLIEngine vs ESLint Class）
+   ESLint 8.57+ 使用 loadESLint（支持 Flat Config）
+   ESLint 7.x 根据设置选择 API
+   ESLint < 7.0 使用 CLIEngine（通过模拟器统一接口）
+   默认使用 ESLint Class
    ↓
 8. eslint.ts:validate() 内部
-   @CORE: 调用 ESLint API 执行 lint
-   @CORE: 将 ESLint 问题转换为 LSP 诊断
-   @CORE: 记录可修复的问题（用于 Code Action）
-   @CORE: 记录所有问题的修复信息（fix、suggestions）
+   调用 ESLint API 执行 lint
+   将 ESLint 问题转换为 LSP 诊断
+   记录可修复的问题（用于 Code Action）
+   记录所有问题的修复信息（fix、suggestions）
 ```
 
 ### 4.4 代码操作（Code Action）链路
 
 ```
 1. client.ts:middleware.provideCodeActions()
-   @CORE: 拦截代码操作请求，过滤只处理 ESLint 诊断，并监控性能
-   @CORE: 过滤出 ESLint 诊断
-   @CORE: 转发到服务器处理代码操作
+   拦截代码操作请求，过滤只处理 ESLint 诊断，并监控性能
+   过滤出 ESLint 诊断
+   转发到服务器处理代码操作
    ↓
 2. eslintServer.ts:connection.onCodeAction()
-   @CORE: 处理代码操作请求（LSP textDocument/codeAction），生成修复、禁用规则、建议等操作
-   @CORE: 获取之前验证时记录的修复信息
-   @CORE: 处理 "Fix All" 类型的代码操作
-   @CORE: 计算所有可修复的问题
-   @CORE: 遍历问题，为每个问题生成代码操作（修复、建议、禁用规则等）
-   @CORE: 生成单个修复操作
+   处理代码操作请求（LSP textDocument/codeAction），生成修复、禁用规则、建议等操作
+   获取之前验证时记录的修复信息
+   处理 "Fix All" 类型的代码操作
+   计算所有可修复的问题
+   遍历问题，为每个问题生成代码操作（修复、建议、禁用规则等）
+   生成单个修复操作
    ↓
 3. eslintServer.ts:connection.onExecuteCommand()
-   @CORE: 执行代码操作命令（LSP workspace/executeCommand），应用修复编辑
-   @CORE: 计算所有修复
+   执行代码操作命令（LSP workspace/executeCommand），应用修复编辑
+   计算所有修复
    ↓
 4. eslintServer.ts:computeAllFixes()
-   @CORE: 计算所有可修复的问题，返回 TextEdit 数组
-   @CORE: 快速模式：只使用已知的修复（不重新运行 ESLint）
-   @CORE: 完整模式：重新运行 ESLint 并计算所有修复
-   @CORE: 使用 ESLint 执行修复（fix: true），然后计算差异
-   @CORE: 执行 lint 并自动修复（output 包含修复后的内容）
-   @CORE: 计算原始内容和修复后内容的差异，生成最小编辑
+   计算所有可修复的问题，返回 TextEdit 数组
+   快速模式：只使用已知的修复（不重新运行 ESLint）
+   完整模式：重新运行 ESLint 并计算所有修复
+   使用 ESLint 执行修复（fix: true），然后计算差异
+   执行 lint 并自动修复（output 包含修复后的内容）
+   计算原始内容和修复后内容的差异，生成最小编辑
 ```
 
 ### 4.5 格式化链路
 
 ```
 1. eslintServer.ts:connection.onDocumentFormatting()
-   @CORE: 处理文档格式化请求（LSP textDocument/formatting）
-   @CORE: 使用 ESLint 修复作为格式化
+   处理文档格式化请求（LSP textDocument/formatting）
+   使用 ESLint 修复作为格式化
    ↓
 2. eslintServer.ts:computeAllFixes() (AllFixesMode.format)
    （同上代码操作链路）

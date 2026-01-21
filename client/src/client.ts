@@ -143,6 +143,8 @@ export namespace ESLintClient {
 		const packageJsonFilter: VDocumentFilter = { scheme: 'file', pattern: '**/package.json' };
 		const configFileFilter: VDocumentFilter = { scheme: 'file', pattern: '**/{.eslintr{c.js,c.yaml,c.yml,c,c.json},eslint.confi{g.js,g.mjs,g.cjs}}' };
 		const supportedQuickFixKinds: Set<string> = new Set([CodeActionKind.Source.value, CodeActionKind.SourceFixAll.value, `${CodeActionKind.SourceFixAll.value}.eslint`, CodeActionKind.QuickFix.value]);
+		// @DATA: 支持的快速修复类型
+		// Set(4) {size: 4, source, source.fixAll, source.fixAll.eslint, quickfix}
 
 		// @DATA: 已同步到服务器的文档映射（URI -> TextDocument），用于跟踪哪些文档需要验证
 		const syncedDocuments: Map<string, TextDocument> = new Map();
@@ -403,7 +405,7 @@ export namespace ESLintClient {
 			return uri.fsPath;
 		}
 
-		// @CORE: 创建服务器选项
+
 		// @CORE: 创建服务器选项，指定服务器入口文件和 IPC 传输方式
 		function createServerOptions(extensionUri: Uri): ServerOptions {
 			const serverModule = Uri.joinPath(extensionUri, 'server', 'out', 'eslintServer.js').fsPath; // 服务器入口文件
@@ -428,6 +430,36 @@ export namespace ESLintClient {
 				run: { module: serverModule, transport: TransportKind.ipc, runtime, options: { execArgv, cwd, env } },
 				debug: { module: serverModule, transport: TransportKind.ipc, runtime, options: { execArgv: execArgv !== undefined ? execArgv.concat(debugArgv) : debugArgv, cwd, env } }
 			};
+			// @DATA: 服务器
+			// {
+			// 	run: {
+			// 	  module: "/home/guowentao/program/vscode-eslint/server/out/eslintServer.js",
+			// 	  transport: 1,
+			// 	  runtime: undefined,
+			// 	  options: {
+			// 		execArgv: undefined,
+			// 		cwd: "/home/guowentao/program/vscode-eslint/playgrounds",
+			// 		env: {
+			// 		  NODE_ENV: "",
+			// 		},
+			// 	  },
+			// 	},
+			// 	debug: {
+			// 	  module: "/home/guowentao/program/vscode-eslint/server/out/eslintServer.js",
+			// 	  transport: 1,
+			// 	  runtime: undefined,
+			// 	  options: {
+			// 		execArgv: [
+			// 		  "--nolazy",
+			// 		  "--inspect=6011",
+			// 		],
+			// 		cwd: "/home/guowentao/program/vscode-eslint/playgrounds",
+			// 		env: {
+			// 		  NODE_ENV: "",
+			// 		},
+			// 	  },
+			// 	},
+			//   }
 			return result;
 		}
 
@@ -444,10 +476,11 @@ export namespace ESLintClient {
 		function createClientOptions(): LanguageClientOptions {
 			const clientOptions: LanguageClientOptions = {
 				documentSelector: [{ scheme: 'file' }, { scheme: 'untitled' }],
-				revealOutputChannelOn: RevealOutputChannelOn.Never,
+				revealOutputChannelOn: RevealOutputChannelOn.Never, // 4
 				initializationOptions: {
 				},
 				progressOnInitialization: true,
+				// 文件系统监听
 				synchronize: {
 					fileEvents: [
 						Workspace.createFileSystemWatcher('**/.eslintr{c.js,c.cjs,c.yaml,c.yml,c,c.json}'),
@@ -472,10 +505,12 @@ export namespace ESLintClient {
 						return defaultErrorHandler.closed();
 					}
 				},
+				// 诊断拉取配置
 				diagnosticPullOptions: {
 					onChange: true,
 					onSave: true,
 					onFocus: true,
+					// 过滤
 					filter: (document, mode) => {
 						const config = Workspace.getConfiguration('eslint', document);
 						const run = config.get<RunValues>('run', 'onType');
@@ -492,12 +527,14 @@ export namespace ESLintClient {
 				middleware: {
 					// @CORE: 拦截文档打开，只同步需要验证的文档到服务器
 					didOpen: async (document, next) => {
+						// @Q: next 什么作用？继续执行下一个中间件？
 						console.log('didOpen', document.uri.toString());
+						// didOpen file:///home/guowentao/program/vscode-eslint/playgrounds/7.0/test.js
 						if (Languages.match(packageJsonFilter, document) || Languages.match(configFileFilter, document) || validator.check(document) !== Validate.off) {
 							const result = next(document);
 							// @DATA: 将文档添加到同步映射，文档内容通过 LSP 同步到服务器
+							// Map(1) {size: 1, key: 'file:///home/guowentao/program/vscode-eslint/playgrounds/7.0/test.js' => value: {uri: <acc…or>, …}}
 							syncedDocuments.set(document.uri.toString(), document);
-
 							return result;
 						}
 					},
@@ -560,8 +597,7 @@ export namespace ESLintClient {
 							return next(document, cells);
 						}
 					},
-					// @CORE: 核心拦截器，负责将 server 传过来的原始数据进行处理，然后返回给 client
-					// @CORE: 拦截代码操作请求，过滤只处理 ESLint 诊断，并监控性能
+					// @CORE: 核心拦截器，负责将 server 传过来的原始数据进行处理，然后返回给 client，过滤只处理 ESLint 诊断，并监控性能
 					provideCodeActions: async (document, range, context, token, next): Promise<(Command | CodeAction)[] | null | undefined> => {
 						if (!syncedDocuments.has(document.uri.toString())) {
 							return [];
@@ -577,6 +613,7 @@ export namespace ESLintClient {
 						for (const diagnostic of context.diagnostics) {
 							if (diagnostic.source === 'eslint') {
 								eslintDiagnostics.push(diagnostic);
+								// (1) [ProtocolDiagnostic]
 							}
 						}
 						if (context.only === undefined && eslintDiagnostics.length === 0) {
@@ -584,6 +621,43 @@ export namespace ESLintClient {
 						}
 						// @DATA: 构建新的代码操作上下文，只包含 ESLint 诊断
 						const newContext: CodeActionContext = Object.assign({}, context, { diagnostics: eslintDiagnostics });
+						// {
+						// diagnostics: [
+						// 	{
+						// 	range: {
+						// 		_start: {
+						// 		_line: 7,
+						// 		_character: 1,
+						// 		},
+						// 		_end: {
+						// 		_line: 7,
+						// 		_character: 12,
+						// 		},
+						// 	},
+						// 	message: "Unexpected console statement. Only these console methods are allowed: warn, error.",
+						// 	severity: 0,
+						// 	data: undefined,
+						// 	hasDiagnosticCode: false,
+						// 	code: {
+						// 		value: "no-console",
+						// 		target: {
+						// 		scheme: "https",
+						// 		authority: "eslint.org",
+						// 		path: "/docs/latest/rules/no-console",
+						// 		query: "",
+						// 		fragment: "",
+						// 		_formatted: "https://eslint.org/docs/latest/rules/no-console",
+						// 		_fsPath: null,
+						// 		},
+						// 	},
+						// 	source: "eslint",
+						// 	},
+						// ],
+						// only: {
+						// 	value: "quickfix",
+						// },
+						// triggerKind: 1,
+						// }
 						const start = Date.now();
 						// @CORE: 转发到服务器处理代码操作
 						const result = await next(document, range, newContext, token);

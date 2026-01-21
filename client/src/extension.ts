@@ -66,14 +66,12 @@ let acknowledgePerformanceStatus: () => void;
 const taskProvider: TaskProvider = new TaskProvider();
 const validator: Validator = new Validator();
 
-// @CORE: 扩展激活入口，实现延迟激活机制
 export function activate(context: ExtensionContext) {
 
 	function didOpenTextDocument(textDocument: TextDocument) {
 		if (activated) {
 			return;
 		}
-		// @CORE: 验证文档是否需要 ESLint 处理
 		if (validator.check(textDocument) !== Validate.off) {
 			openListener.dispose();
 			configurationListener.dispose();
